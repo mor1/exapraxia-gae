@@ -1,0 +1,21 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN">
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>{{ title }}</title>
+    <link href="/static/main.css" rel="stylesheet" type="text/css"/>
+  </head>
+
+  <body>
+    {% block header %}
+    {% include "header.html" %}
+    {% endblock %}
+
+    {% block body %}
+    {% endblock %}
+
+    {% block footer %}
+    {% include "footer.html" %}
+    {% endblock %}
+  </body>
+</html>
