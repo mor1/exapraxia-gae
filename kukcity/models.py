@@ -16,64 +16,40 @@
 
 """Model schema for Kukcity, George's Twitter experiment."""
 
-import sys, logging, traceback, urllib, urlparse
+import sys, logging, datetime, time
 log = logging.info
 err = logging.exception
 
+from django.utils import simplejson as json
 from google.appengine.ext import db
-from google.appengine.api import datastore_errors, urlfetch
 
-class SVC_STATUS:
-    needauth = 'NEEDAUTH'
-    authorized = 'AUTHORIZED'
+def datetime_as_float(dt):
+    '''Convert a datetime.datetime into a microsecond-precision float.'''
+    return time.mktime(dt.timetuple())+(dt.microsecond/1e6)
 
 class SYNC_STATUS:
     unsynchronized = 'UNSYNCHRONIZED'
     inprogress = 'INPROGRESS'
-    halting = 'HALTING'
     synchronized = 'SYNCHRONIZED'
 
-class SyncService(db.Model):
-    svcname = db.StringProperty()
-    username = db.StringProperty()
-    status = db.StringProperty(default=SVC_STATUS.needauth)
-    
+class SyncStatus(db.Model):
+    status = db.StringProperty(default=SYNC_STATUS.unsynchronized, required=True)
+    last_sync = db.DateTimeProperty()
+
     def todict(self):
-        return { 'svcname': self.svcname,
-                 'username': self.username,
-                 'status': self.status,
-                 'threads': map(lambda x:x.todict(), self.threads),
+        ## hack: mutual recursion ahoy.  bah.
+        last_sync = datetime_as_float(self.last_sync) if self.last_sync else None
+        return { 'status': self.status,
+                 'last_sync': last_sync,
                  }
     def tojson(self):
         return json.dumps(self.todict(), indent=2)
 
-    @staticmethod
-    def of_service(svcname):
-        s = secret.OAuth.all().filter("service =", svcname).get()
-        username = s.username if s else None
-        status = SVC_STATUS.authorized if s else SVC_STATUS.needauth
-        
-        ss = db.GqlQuery("SELECT * FROM SyncService WHERE svcname=:s AND username=:u",
-                         s=svcname, u=username).get()
-        if not ss:
-            ss = SyncService(svcname=svcname, username=username, status=status)
-        ss.username = username
-        ss.status = status
-        ss.put()
-        return ss
-            
+    def put(self):
+        if self.status == SYNC_STATUS.synchronized:
+            self.last_sync = datetime.datetime.now()
+        super(SyncStatus, self).put()
 
-
-
-
-class User(db.Model):
-    user = db.UserProperty(required=True, auto_current_user_add=True)
-    auth = db.BooleanProperty(required=True, default=False)
-    ctime = db.DateTimeProperty(auto_now_add=True)
-    atime = db.DateTimeProperty(auto_now=True)
-
-class Access(db.Model):
-    user = db.ReferenceProperty(User, collection_name="accesses", required=True)
-    uri = db.LinkProperty(required=True)
-    ctime = db.DateTimeProperty(auto_now_add=True)
-    atime = db.DateTimeProperty(auto_now=True)
+class Tweet(db.Model):
+    raw = db.TextProperty(required=True)
+    txt = db.StringProperty(required=True)

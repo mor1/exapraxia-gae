@@ -16,47 +16,26 @@
 
 """View handlers for Kukcity, George's Twitter experiment."""
 
-import logging
+import logging, urllib
 log = logging.info
 
+from google.appengine.api import urlfetch
 from google.appengine.ext import webapp
 from google.appengine.api.labs import taskqueue
+from google.appengine.api import users
 from django.utils import simplejson as json
 
-import support.oauth as oauth
-import support.secret as secret
-import models
+import kukcity.models as models
 
-import twapp
-app_key = twapp.app_key"loP38tlepqhkek5dHZl3w"
-app_secret = twapp.app_secret"28Ze4D7OPlrhfg71E0HPGevnyI58IQe6GIhyhlxciI"
+COUNT = 80
+HASHTAG = '#kukcity'
 
-def base_url(req):
-    bu = "%s://%s:%s/kukcity" % (
-        req.scheme, req.environ['SERVER_NAME'], req.environ['SERVER_PORT'])
-    return bu
-
-def login_url(req): return "%s/login" % base_url(req)
-def callback_url(req): return "%s/verify" % base_url(req)
- 
-class Login(webapp.RequestHandler):
+class Root(webapp.RequestHandler):
     def get(self):
-        client = oauth.TwitterClient(
-            app_key, app_secret, callback_url(self.request))
-        self.redirect(client.get_authorization_url())
+        tweets = [ json.loads(t.raw) for t in models.Tweet.all().order('__key__') ]
 
-class Verify(webapp.RequestHandler):
-    def get(self):
-        client = oauth.TwitterClient(app_key, app_secret, callback_url)
-        auth_token = self.request.GET.get("oauth_token")
-        auth_verifier = self.request.GET.get("oauth_verifier")
-        user_info = client.get_user_info(auth_token, auth_verifier=auth_verifier)
-        user_secret = user_info['secret']
-        username = user_info['username']
-        s = secret.OAuth(service="twitter", token=user_info['token'],
-                         secret=user_secret, username=username)
-        s.put()
-        self.redirect("/")
+        self.response.headers['Content-Type'] = 'application/json'
+        self.response.out.write(json.dumps(tweets))
 
 class Cron(webapp.RequestHandler):
     def get(self):
@@ -64,36 +43,58 @@ class Cron(webapp.RequestHandler):
 
 class Sync(webapp.RequestHandler):
     def get(self, cmd):
-        ss = models.SyncService.of_service("twitter")
+        ss = models.SyncStatus.get_by_key_name("twitter-status")
         self.response.headers['Content-Type'] = 'application/json'
         self.response.out.write(ss.tojson())
 
     def post(self, cmd):
-        ss = models.SyncService.of_service("twitter")
-        if not ss or ss.status == models.SVC_STATUS.needauth:
-            self.response.set_status(400)
-            return
-        
-        u = "/kukcity/tweets/?sync=1"
         if cmd == "start":
-            s = models.SyncStatus.all().filter(
-                "service =", ss).filter("thread =", u).get()
-            if not s: s = models.SyncStatus(service=ss, thread=u)
-
+            s = models.SyncStatus.get_or_insert("twitter-status")
             if s.status != models.SYNC_STATUS.inprogress:
-                taskqueue.add(url=u, method="GET")
+                taskqueue.add(url="/kukcity/tweets/", method="GET")
                 s.status = models.SYNC_STATUS.inprogress
                 
             s.put()
 
         elif cmd == "stop":
-            s = models.SyncStatus.all().filter(
-                "service =", ss).filter("thread =", u).get()
-            if not s: continue
-
+            s = models.SyncStatus.get()
             if s.status == models.SYNC_STATUS.inprogress:
                 s.status = models.SYNC_STATUS.unsynchronized
                 s.put()
 
         self.response.headers['Content-Type'] = 'application/json'
-        self.response.out.write(ss.tojson())
+        self.response.out.write(s.tojson())
+
+class Tweets(webapp.RequestHandler):
+    def get(self):
+        ps = { 'q': HASHTAG, 'rpp': COUNT, }
+        max_id = self.request.GET.get("max_id")
+        if max_id: ps['max_id'] = max_id
+
+        page = self.request.GET.get("page")
+        if page: ps['page'] = page
+        
+        url = "http://search.twitter.com/search.json?%s" % (urllib.urlencode(ps),)
+        log("url:%s" % url)
+        res = urlfetch.fetch(url)
+        log("res:%s\nhdr:%s" % (res.content, res.headers))
+        js = json.loads(res.content)
+
+        if 'results' in js:
+            for tw in js['results']:
+                t = models.Tweet.get_or_insert(
+                    tw['id_str'], raw=json.dumps(tw), txt=tw['text'])
+                t.put()
+
+        if 'next_page' in js:
+            ## page=2&max_id=46480544355192832&rpp=2&q=%23kukcity
+            next_page = "%s%s" % (self.request.path_url, js['next_page'],)
+            taskqueue.add(url=next_page, method="GET")
+
+        else:
+            s = models.SyncStatus.get_by_key_name("twitter-status")
+            s.status = models.SYNC_STATUS.synchronized
+            s.put()
+        
+        self.response.headers['Content-Type'] = 'application/json'
+        self.response.out.write(json.dumps(js, indent=2))

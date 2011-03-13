@@ -19,18 +19,19 @@
 from google.appengine.ext import webapp
 from google.appengine.ext.webapp.util import run_wsgi_app
 
-import views
+import kukcity.views as views
 
 urls = map(
     lambda (p,c): (r'^/kukcity/%s' % p, c),
-    [ (r'/login/?$', views.Login),
-      (r'/verify/?$', views.Verify),
+    [ (r'?$', views.Root),
+      (r'cron/?$', views.Cron),
+      (r'sync(?:/(?P<cmd>start|stop))?/?$', views.Sync),
+      (r'tweets/?$', views.Tweets),
 
-      (r'/cron/?$', views.Cron),
-      (r'/sync/(?:/(?P<cmd>start|stop))?/', views.Sync),
+      ## (r'login/?$', views.Login),
+      ## (r'verify/?$', views.Verify),
       
-      (r'/tweets/?$', views.Tweets),
-      ]
+      ])
     
 application = webapp.WSGIApplication(urls, debug=True)
 def main(): run_wsgi_app(application) 
