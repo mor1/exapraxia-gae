@@ -82,7 +82,9 @@ class Tweets(webapp.RequestHandler):
 
         if 'error' in js: ## retry after specified time
             retry = int(res.headers.get('retry-after', '300'))
-            taskqueue.add(url=self.request.url, countdown=retry+2, method="GET")
+            rurl = "%s?%s" % (self.request.path, self.request.query_string)
+            log("retry: url:%s countdown:%d" % (rurl, retry+2,))
+            taskqueue.add(url=rurl, countdown=retry+2, method="GET")
 
         else:
             if 'results' in js:
