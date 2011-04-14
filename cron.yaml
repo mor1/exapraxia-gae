@@ -17,4 +17,4 @@
 cron:
 - description: twitter poller
   url: /kukcity/cron
-  schedule: every 30 minutes
+  schedule: every 120 minutes

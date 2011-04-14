@@ -80,21 +80,26 @@ class Tweets(webapp.RequestHandler):
         log("res:%s\nhdr:%s" % (res.content, res.headers))
         js = json.loads(res.content)
 
-        if 'results' in js:
-            for tw in js['results']:
-                t = models.Tweet.get_or_insert(
-                    tw['id_str'], raw=json.dumps(tw), txt=tw['text'])
-                t.put()
-
-        if 'next_page' in js:
-            ## page=2&max_id=46480544355192832&rpp=2&q=%23kukcity
-            next_page = "%s%s" % (self.request.path_url, js['next_page'],)
-            taskqueue.add(url=next_page, method="GET")
+        if 'error' in js: ## retry after specified time
+            retry = int(res.headers.get('retry-after', '300'))
+            taskqueue.add(url=self.request.url, countdown=retry+2, method="GET")
 
         else:
-            s = models.SyncStatus.get_by_key_name("twitter-status")
-            s.status = models.SYNC_STATUS.synchronized
-            s.put()
+            if 'results' in js:
+                for tw in js['results']:
+                    t = models.Tweet.get_or_insert(
+                        tw['id_str'], raw=json.dumps(tw), txt=tw['text'])
+                    t.put()
+
+            if 'next_page' in js:
+                ## page=2&max_id=46480544355192832&rpp=2&q=%23kukcity
+                next_page = "%s%s" % (self.request.path_url, js['next_page'],)
+                taskqueue.add(url=next_page, method="GET")
+
+            else:
+                s = models.SyncStatus.get_by_key_name("twitter-status")
+                s.status = models.SYNC_STATUS.synchronized
+                s.put()
         
         self.response.headers['Content-Type'] = 'application/json'
         self.response.out.write(json.dumps(js, indent=2))
